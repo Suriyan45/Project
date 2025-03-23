@@ -1,0 +1,53 @@
+from flask import Flask, request, render_template
+import mysql.connector
+
+app = Flask(__name__)
+
+# ฟังก์ชันเชื่อมต่อฐานข้อมูล MySQL
+def get_db_connection():
+    return mysql.connector.connect(
+        host='localhost',
+        user='root',
+        password='',
+        database='sms_filter'
+    )
+
+# หน้าแรกของเว็บ
+@app.route('/')
+def home():
+    return render_template('index.html', message="", result=None)
+
+# ตรวจสอบข้อความสแปม
+@app.route('/check_spam', methods=['POST'])
+def check_spam():
+    message = request.form['message']  # ข้อความที่ผู้ใช้พิมพ์
+
+    # ดึงคำสแปมจากฐานข้อมูล
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT keyword FROM spam_keywords")
+    spam_keywords = cursor.fetchall()
+
+    # ตรวจสอบข้อความว่ามีคำสแปมหรือไม่
+    for keyword in spam_keywords:
+        if keyword[0] in message:
+            # ตรวจสอบว่าข้อความนี้เคยถูกบันทึกในฐานข้อมูลหรือไม่
+            cursor.execute("SELECT COUNT(*) FROM spam_messages WHERE message = %s", (message,))
+            (count,) = cursor.fetchone()
+
+            if count == 0:
+                # ถ้ายังไม่มีข้อความนี้ในฐานข้อมูล → ให้บันทึก
+                cursor.execute("INSERT INTO spam_messages (message) VALUES (%s)", (message,))
+                conn.commit()
+                conn.close()
+                return render_template('index.html', message=message, result="❌ ข้อความนี้เป็นสแปม! (บันทึกแล้ว)")
+            else:
+                # ถ้ามีข้อความนี้แล้ว → ให้ลบเฉพาะข้อความที่เข้ามาใหม่ ไม่ลบของเก่า
+                conn.close()
+                return render_template('index.html', message=message, result="❌ ข้อความซ้ำ!และข้อความนี้เป็นสแปม! (ไม่บันทึก)")
+    
+    conn.close()
+    return render_template('index.html', message=message, result="✅ ข้อความนี้ปลอดภัย")
+
+if __name__ == '__main__':
+    app.run(debug=True)
